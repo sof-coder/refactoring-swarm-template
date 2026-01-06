@@ -23,3 +23,11 @@ class SandboxManager:
                 attempted_path=str(path),
                 sandbox_root=str(self.sandbox_root)
             )
+    
+    def is_safe(self, path):
+        """Check if path is safe without raising exception."""
+        try:
+            self.validate_path(path)
+            return True
+        except SecurityError:
+            return False
