@@ -160,3 +160,77 @@ class FileOperations:
                 error=f"Unexpected error: {type(e).__name__}: {str(e)}"
             )
     
+    def write_file(self, filepath: Union[str, Path], content: str,
+                   encoding: str = "utf-8", create_backup: bool = True) -> FileOperationResult:
+        """Write content to a file atomically.
+        
+        This method performs atomic writes to prevent data corruption:
+        1. Validates the path is within sandbox
+        2. Creates backup of existing file (if requested)
+        3. Writes to temporary file
+        4. Renames temp file to target (atomic operation)
+        
+        Args:
+            filepath: Path to file (relative to sandbox or absolute within sandbox)
+            content: Content to write
+            encoding: Character encoding (default: utf-8)
+            create_backup: Whether to backup existing file (default: True)
+            
+        Returns:
+            FileOperationResult with success status
+            
+        Example:
+            >>> result = file_ops.write_file("output.py", "print('hello')")
+            >>> if result.success:
+            ...     print(f"Wrote to {result.filepath}")
+        """
+        try:
+            # Validate path
+            safe_path = self._sandbox.validate_path(filepath)
+            
+            # Create parent directories if needed
+            safe_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Create backup if file exists
+            backup_path = None
+            if create_backup and safe_path.exists():
+                backup_result = self.create_backup(safe_path)
+                if backup_result.success:
+                    backup_path = backup_result.metadata.get("backup_path")
+            
+            # Write to temporary file first (atomic operation)
+            temp_path = safe_path.with_suffix(safe_path.suffix + ".tmp")
+            temp_path.write_text(content, encoding=encoding)
+            
+            # Atomic rename
+            temp_path.replace(safe_path)
+            
+            # Get file metadata
+            stat = safe_path.stat()
+            metadata = {
+                "size_bytes": stat.st_size,
+                "encoding": encoding,
+                "line_count": content.count('\n') + 1,
+                "backup_created": backup_path is not None,
+                "backup_path": backup_path
+            }
+            
+            return FileOperationResult(
+                success=True,
+                filepath=str(safe_path),
+                metadata=metadata
+            )
+            
+        except SecurityError as e:
+            return FileOperationResult(
+                success=False,
+                filepath=str(filepath),
+                error=f"Security violation: {e.message}"
+            )
+        except Exception as e:
+            return FileOperationResult(
+                success=False,
+                filepath=str(filepath),
+                error=f"Write failed: {type(e).__name__}: {str(e)}"
+            )
+    
