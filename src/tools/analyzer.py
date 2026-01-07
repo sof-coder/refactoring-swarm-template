@@ -271,3 +271,135 @@ class PylintAnalyzer:
         
         Args:
             raw_output: Raw Pylint output (JSON format)
+            
+        Returns:
+            Tuple of (score, list of issues)
+        """
+        issues: List[Issue] = []
+        score = 0.0
+        
+        try:
+            # Pylint outputs JSON array of messages
+            # Score is printed after the JSON in stderr
+            # We need to handle both
+            
+            # Try to parse as JSON first
+            if raw_output.strip():
+                try:
+                    messages = json.loads(raw_output)
+                    
+                    # Convert each message to Issue
+                    for msg in messages:
+                        issue = Issue(
+                            type=msg.get("type", "unknown"),
+                            line=msg.get("line", 0),
+                            column=msg.get("column", 0),
+                            message=msg.get("message", ""),
+                            symbol=msg.get("symbol", ""),
+                            message_id=msg.get("message-id", ""),
+                            severity=self.SEVERITY_MAP.get(msg.get("type", ""), 0)
+                        )
+                        issues.append(issue)
+                except json.JSONDecodeError:
+                    # Output might not be valid JSON, try text parsing
+                    pass
+            
+            # Extract score from output (usually in a separate line)
+            # Format: "Your code has been rated at 7.50/10"
+            score_match = re.search(r"rated at ([\d\.-]+)/10", raw_output)
+            if score_match:
+                score = float(score_match.group(1))
+            
+        except Exception as e:
+            # If parsing fails, return defaults
+            pass
+        
+        return score, issues
+    
+    def _count_by_type(self, issues: List[Issue]) -> dict:
+        """Count issues by type.
+        
+        Args:
+            issues: List of issues
+            
+        Returns:
+            Dictionary mapping type to count
+        """
+        counts = {
+            "fatal": 0,
+            "error": 0,
+            "warning": 0,
+            "refactor": 0,
+            "convention": 0
+        }
+        
+        for issue in issues:
+            if issue.type in counts:
+                counts[issue.type] += 1
+        
+        return counts
+    
+    def compare_scores(self, before: AnalysisResult, 
+                      after: AnalysisResult) -> dict:
+        """Compare two analysis results.
+        
+        Args:
+            before: Analysis result before changes
+            after: Analysis result after changes
+            
+        Returns:
+            Dictionary with comparison metrics
+            
+        Example:
+            >>> comparison = analyzer.compare_scores(before, after)
+            >>> print(f"Score improved by {comparison['score_delta']}")
+        """
+        return {
+            "score_before": before.score,
+            "score_after": after.score,
+            "score_delta": after.score - before.score,
+            "improved": after.score > before.score,
+            "issues_before": len(before.issues),
+            "issues_after": len(after.issues),
+            "issues_fixed": len(before.issues) - len(after.issues)
+        }
+
+
+# Module-level convenience function
+def run_pylint(filepath: Union[str, Path], 
+               sandbox: Optional[SandboxManager] = None,
+               timeout: int = 30) -> AnalysisResult:
+    """Convenience function to run Pylint analysis.
+    
+    Args:
+        filepath: Path to Python file
+        sandbox: Optional SandboxManager (uses global if None)
+        timeout: Timeout in seconds
+        
+    Returns:
+        AnalysisResult
+        
+    Example:
+        >>> from src.tools import run_pylint
+        >>> result = run_pylint("code.py")
+        >>> print(result.score)
+    """
+    from .sandbox import get_sandbox
+    sandbox = sandbox or get_sandbox()
+    analyzer = PylintAnalyzer(sandbox, timeout=timeout)
+    return analyzer.analyze(filepath)
+
+
+def get_quality_score(filepath: Union[str, Path],
+                      sandbox: Optional[SandboxManager] = None) -> float:
+    """Get just the quality score (convenience function).
+    
+    Args:
+        filepath: Path to Python file
+        sandbox: Optional SandboxManager
+        
+    Returns:
+        Quality score (0.0 - 10.0), or 0.0 if analysis fails
+    """
+    result = run_pylint(filepath, sandbox)
+    return result.score if result.success else 0.0
