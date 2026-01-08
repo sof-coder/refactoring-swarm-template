@@ -274,3 +274,64 @@ class CodeParser:
             ...     print(f"Class {cls.name} with {len(cls.methods)} methods")
         """
         try:
+            tree = self.parse_file(filepath)
+            if tree is None:
+                return []
+            
+            classes: List[ClassInfo] = []
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    # Extract base classes
+                    base_classes = []
+                    for base in node.bases:
+                        if isinstance(base, ast.Name):
+                            base_classes.append(base.id)
+                        elif isinstance(base, ast.Attribute):
+                            base_classes.append(base.attr)
+                    
+                    # Extract methods
+                    methods = []
+                    for item in node.body:
+                        if isinstance(item, ast.FunctionDef):
+                            methods.append(item.name)
+                    
+                    # Check for docstring
+                    has_docstring = (
+                        len(node.body) > 0 and
+                        isinstance(node.body[0], ast.Expr) and
+                        isinstance(node.body[0].value, ast.Constant) and
+                        isinstance(node.body[0].value.value, str)
+                    )
+                    
+                    class_info = ClassInfo(
+                        name=node.name,
+                        line_number=node.lineno,
+                        base_classes=base_classes,
+                        methods=methods,
+                        has_docstring=has_docstring
+                    )
+                    classes.append(class_info)
+            
+            return classes
+            
+        except ParsingError:
+            raise
+        except Exception as e:
+            raise ParsingError(f"Failed to extract classes: {str(e)}")
+    
+    def extract_imports(self, filepath: Union[str, Path]) -> List[ImportInfo]:
+        """Extract all import statements from a file.
+        
+        Args:
+            filepath: Path to Python file
+            
+        Returns:
+            List of ImportInfo objects
+            
+        Example:
+            >>> imports = parser.extract_imports("code.py")
+            >>> for imp in imports:
+            ...     print(f"Imports {imp.module}")
+        """
+        try:
