@@ -335,3 +335,173 @@ class CodeParser:
             ...     print(f"Imports {imp.module}")
         """
         try:
+            tree = self.parse_file(filepath)
+            if tree is None:
+                return []
+            
+            imports: List[ImportInfo] = []
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        import_info = ImportInfo(
+                            module=alias.name,
+                            line_number=node.lineno,
+                            alias=alias.asname,
+                            is_from_import=False
+                        )
+                        imports.append(import_info)
+                
+                elif isinstance(node, ast.ImportFrom):
+                    names = [alias.name for alias in node.names]
+                    import_info = ImportInfo(
+                        module=node.module or "",
+                        line_number=node.lineno,
+                        names=names,
+                        is_from_import=True
+                    )
+                    imports.append(import_info)
+            
+            return imports
+            
+        except ParsingError:
+            raise
+        except Exception as e:
+            raise ParsingError(f"Failed to extract imports: {str(e)}")
+    
+    def find_syntax_errors(self, filepath: Union[str, Path]) -> List[Dict[str, Any]]:
+        """Find syntax errors in a file without executing it.
+        
+        Args:
+            filepath: Path to Python file
+            
+        Returns:
+            List of syntax error dictionaries
+            
+        Example:
+            >>> errors = parser.find_syntax_errors("bad_code.py")
+            >>> for error in errors:
+            ...     print(f"Line {error['line']}: {error['message']}")
+        """
+        try:
+            # Try to parse - if it succeeds, no syntax errors
+            self.parse_file(filepath)
+            return []
+            
+        except ParsingError as e:
+            # Return structured error info
+            return [{
+                "line": e.context.get("line_number", 0),
+                "message": e.message,
+                "code_snippet": e.context.get("code_snippet", "")
+            }]
+    
+    def get_code_metrics(self, filepath: Union[str, Path]) -> CodeMetrics:
+        """Calculate code metrics for a file.
+        
+        Args:
+            filepath: Path to Python file
+            
+        Returns:
+            CodeMetrics object
+            
+        Example:
+            >>> metrics = parser.get_code_metrics("code.py")
+            >>> print(f"{metrics.code_lines} lines of code")
+        """
+        try:
+            # Read file
+            result = read_file(filepath, self._sandbox)
+            if not result.success:
+                return CodeMetrics()
+            
+            content = result.content
+            lines = content.split('\n')
+            
+            # Count lines
+            total_lines = len(lines)
+            comment_lines = sum(1 for line in lines if line.strip().startswith('#'))
+            code_lines = sum(1 for line in lines if line.strip() and not line.strip().startswith('#'))
+            
+            # Max line length
+            max_line_length = max(len(line) for line in lines) if lines else 0
+            
+            # Try to parse AST for function/class counts
+            function_count = 0
+            class_count = 0
+            import_count = 0
+            
+            try:
+                tree = self.parse_file(filepath)
+                if tree:
+                    function_count = len(self.extract_functions(filepath))
+                    class_count = len(self.extract_classes(filepath))
+                    import_count = len(self.extract_imports(filepath))
+            except:
+                pass
+            
+            return CodeMetrics(
+                total_lines=total_lines,
+                code_lines=code_lines,
+                comment_lines=comment_lines,
+                function_count=function_count,
+                class_count=class_count,
+                import_count=import_count,
+                max_line_length=max_line_length
+            )
+            
+        except Exception as e:
+            return CodeMetrics()
+
+
+# Module-level convenience functions
+def extract_functions(filepath: Union[str, Path],
+                     sandbox: Optional[SandboxManager] = None) -> List[FunctionInfo]:
+    """Convenience function to extract functions.
+    
+    Args:
+        filepath: Path to Python file
+        sandbox: Optional SandboxManager (uses global if None)
+        
+    Returns:
+        List of FunctionInfo objects
+    """
+    from .sandbox import get_sandbox
+    sandbox = sandbox or get_sandbox()
+    parser = CodeParser(sandbox)
+    return parser.extract_functions(filepath)
+
+
+def extract_classes(filepath: Union[str, Path],
+                   sandbox: Optional[SandboxManager] = None) -> List[ClassInfo]:
+    """Convenience function to extract classes.
+    
+    Args:
+        filepath: Path to Python file
+        sandbox: Optional SandboxManager (uses global if None)
+        
+    Returns:
+        List of ClassInfo objects
+    """
+    from .sandbox import get_sandbox
+    sandbox = sandbox or get_sandbox()
+    parser = CodeParser(sandbox)
+    return parser.extract_classes(filepath)
+
+
+def get_imports(filepath: Union[str, Path],
+               sandbox: Optional[SandboxManager] = None) -> List[str]:
+    """Get list of imported module names (convenience function).
+    
+    Args:
+        filepath: Path to Python file
+        sandbox: Optional SandboxManager
+        
+    Returns:
+        List of module names
+    """
+    from .sandbox import get_sandbox
+    sandbox = sandbox or get_sandbox()
+    parser = CodeParser(sandbox)
+    imports = parser.extract_imports(filepath)
+    return [imp.module for imp in imports if imp.module]
