@@ -151,3 +151,20 @@ class TestSandboxSecurity:
 class TestFileOperations:
     """Test file operation functionality."""
     
+    def test_read_file_success(self, sandbox, sample_python_file):
+        """Test successful file reading."""
+        file_ops = FileOperations(sandbox)
+        result = file_ops.read_file("sample.py")
+        
+        assert result.success is True
+        assert result.content is not None
+        assert "def hello" in result.content
+        assert result.metadata["line_count"] > 0
+    
+    def test_read_nonexistent_file(self, sandbox):
+        """Test reading a file that doesn't exist."""
+        file_ops = FileOperations(sandbox)
+        result = file_ops.read_file("nonexistent.py")
+        
+        assert result.success is False
+        assert result.error is not None
