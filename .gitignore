@@ -1,12 +1,18 @@
 # .gitignore
 __pycache__/
 *.pyc
-# .gitignore
-__pycache__/
-*.pyc
+
+# Virtual environment & secrets
 venv/
 .env
+
+# OS files
 .DS_Store
+
+
+# IDE
+.vscode/
+.idea/
 
 # Dossier de travail temporaire (ne pas récupérer les modifications des étudiants ici)
 sandbox/
