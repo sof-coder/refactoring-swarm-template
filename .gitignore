@@ -1,15 +1,22 @@
 # .gitignore
 __pycache__/
 *.pyc
-# .gitignore
-__pycache__/
-*.pyc
+
+# Virtual environment & secrets
 venv/
 .env
+
+# OS files
 .DS_Store
 
-# Dossier de travail temporaire (ne pas récupérer les modifications des étudiants ici)
-sandbox/
+
+# IDE
+.vscode/
+.idea/
+
+# Sandbox contains versioned buggy code used as internal test dataset
+# Required by the Refactoring Swarm architecture
+# sandbox/
 
 # LOGS : On ignore tout le dossier logs...
 logs/*

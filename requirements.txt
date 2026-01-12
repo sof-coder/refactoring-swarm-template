@@ -1,9 +1,15 @@
+# LLM / Agents
 langchain==0.1.10
 langchain-openai==0.0.8
 langchain-google-genai==0.0.9
 langgraph==0.0.25
+mistralai==1.10.0
+
+# Tooling & Quality
 pylint==3.0.3
 pytest==7.4.4
+
+# Utilities
 python-dotenv==1.0.1
-pandas==2.2.0
 colorama==0.4.6
+pandas==2.2.0
