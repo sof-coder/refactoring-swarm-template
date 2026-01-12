@@ -14,8 +14,9 @@ venv/
 .vscode/
 .idea/
 
-# Dossier de travail temporaire (ne pas récupérer les modifications des étudiants ici)
-sandbox/
+# Sandbox contains versioned buggy code used as internal test dataset
+# Required by the Refactoring Swarm architecture
+# sandbox/
 
 # LOGS : On ignore tout le dossier logs...
 logs/*
