@@ -4,9 +4,10 @@ from dotenv import load_dotenv
 from mistralai import Mistral
 
 from src.tools import (
-    extract_issues,
-    apply_fixes,
-    score_solution
+    run_pylint,
+    get_quality_score,
+    run_pytest,
+    get_test_status
 )
 
 # Load environment variables
@@ -36,103 +37,59 @@ def _chat(system_prompt: str, user_prompt: str) -> str:
 
 def auditor_agent(code: str, task_description: str) -> dict:
     """
-    Analyzes code and identifies bugs, security issues, and deviations
-    from the task requirements.
+    Analyzes code using static analysis tools and returns issues and score.
     """
-    system_prompt = (
-        "You are an expert software auditor. "
-        "Your job is to analyze code critically and precisely."
-    )
+    # Write code to a temp file in sandbox for analysis
+    import tempfile
+    from pathlib import Path
+    from src.tools import initialize_sandbox
 
-    user_prompt = f"""
-Task description:
-{task_description}
+    sandbox = initialize_sandbox("./sandbox")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".py", dir="./sandbox") as tmp:
+        tmp.write(code.encode("utf-8"))
+        tmp_path = Path(tmp.name)
 
-Code to audit:
-{code}
-
-Instructions:
-- Identify logical bugs
-- Identify security issues
-- Identify style or best-practice violations
-- Identify mismatches with the task description
-- Be concise and structured
-"""
-
-    audit_report = _chat(system_prompt, user_prompt)
-
-    # Convert raw audit text into structured issues using tools
-    issues = extract_issues(audit_report)
-
+    analysis = run_pylint(tmp_path, sandbox)
+    os.unlink(tmp_path)
     return {
-        "raw_report": audit_report,
-        "issues": issues,
+        "issues": [issue.to_dict() for issue in analysis.issues],
+        "score": analysis.score,
+        "success": analysis.success,
+        "error": analysis.error,
+        "metadata": analysis.metadata,
     }
 
 
 def fixer_agent(code: str, issues: list) -> str:
     """
-    Fixes the provided code based on issues identified by the auditor.
+    This agent is now a placeholder, as automated fixing is not implemented in tools.
+    Returns the original code unchanged.
     """
-    system_prompt = (
-        "You are a senior software engineer. "
-        "You fix code carefully without introducing new bugs."
-    )
-
-    user_prompt = f"""
-Original code:
-{code}
-
-Identified issues:
-{issues}
-
-Instructions:
-- Fix ALL listed issues
-- Preserve existing behavior unless incorrect
-- Improve clarity and robustness
-- Return ONLY the corrected code
-"""
-
-    fixed_code = _chat(system_prompt, user_prompt)
-
-    # Optionally post-process with tools
-    fixed_code = apply_fixes(original=code, proposed=fixed_code)
-
-    return fixed_code
+    # In a real system, you could implement auto-fixes using analysis results.
+    return code
 
 
 def judge_agent(original_code: str, fixed_code: str, task_description: str) -> dict:
     """
-    Evaluates whether the fixed code correctly solves the task
-    and improves upon the original.
+    Evaluates the fixed code using static analysis and testing tools.
     """
-    system_prompt = (
-        "You are a strict but fair software judge. "
-        "You evaluate correctness, quality, and completeness."
-    )
+    import tempfile
+    from pathlib import Path
+    from src.tools import initialize_sandbox
 
-    user_prompt = f"""
-Task description:
-{task_description}
+    sandbox = initialize_sandbox("./sandbox")
+    # Write fixed code to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".py", dir="./sandbox") as tmp:
+        tmp.write(fixed_code.encode("utf-8"))
+        tmp_path = Path(tmp.name)
 
-Original code:
-{original_code}
-
-Fixed code:
-{fixed_code}
-
-Instructions:
-- Compare original vs fixed
-- Judge correctness relative to the task
-- Judge code quality and safety
-- Provide a final verdict
-"""
-
-    judgment = _chat(system_prompt, user_prompt)
-
-    score = score_solution(judgment)
-
+    analysis = run_pylint(tmp_path, sandbox)
+    # Optionally, run tests if available (not implemented here)
+    os.unlink(tmp_path)
     return {
-        "verdict": judgment,
-        "score": score,
+        "score": analysis.score,
+        "issues": [issue.to_dict() for issue in analysis.issues],
+        "success": analysis.success,
+        "error": analysis.error,
+        "metadata": analysis.metadata,
     }
