@@ -96,6 +96,16 @@ from .parser import (
     get_imports
 )
 
+# ============================================================================
+# CODE FIXING
+# ============================================================================
+from .function_fixer import (
+    FunctionFixer,
+    FixResult,
+    FixedIssue,
+    fix_code
+)
+
 
 # ============================================================================
 # PUBLIC API EXPORTS
@@ -145,6 +155,12 @@ __all__ = [
     'extract_functions',
     'extract_classes',
     'get_imports',
+    
+    # Code Fixing
+    'FunctionFixer',
+    'FixResult',
+    'FixedIssue',
+    'fix_code',
 ]
 
 
@@ -187,4 +203,5 @@ def quick_start(sandbox_path: str = "./sandbox"):
         'parse': lambda path: CodeParser(sandbox).parse_file(path),
         'extract_functions': lambda path: extract_functions(path, sandbox),
         'extract_classes': lambda path: extract_classes(path, sandbox),
+        'fix_code': lambda code, issues: fix_code(code, issues, sandbox),
     }
