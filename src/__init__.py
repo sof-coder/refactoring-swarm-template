@@ -9,7 +9,7 @@ This package contains the core components for the multi-agent refactoring system
 
 from .agents import auditor_agent, fixer_agent, judge_agent
 from .graph import app
-from .tools import read_file, write_file, run_tests
+from .tools import read_file, write_file, run_pytest
 
 __all__ = [
     "auditor_agent",
@@ -18,5 +18,5 @@ __all__ = [
     "app",
     "read_file",
     "write_file",
-    "run_tests",
+    "run_pytest",
 ]

@@ -4,10 +4,11 @@ from dotenv import load_dotenv
 from mistralai import Mistral
 
 from src.tools import (
-    extract_issues,
-    apply_fixes,
-    score_solution
+    run_pylint,
+    get_quality_score,
+    run_pytest,
 )
+from src.utils.logger import log_experiment, ActionType
 
 # Load environment variables
 load_dotenv()
@@ -36,103 +37,151 @@ def _chat(system_prompt: str, user_prompt: str) -> str:
 
 def auditor_agent(code: str, task_description: str) -> dict:
     """
-    Analyzes code and identifies bugs, security issues, and deviations
-    from the task requirements.
+    Analyzes code using static analysis tools and returns issues and score.
     """
-    system_prompt = (
-        "You are an expert software auditor. "
-        "Your job is to analyze code critically and precisely."
-    )
+    # Write code to a temp file in sandbox for analysis
+    import tempfile
+    from pathlib import Path
+    from src.tools import initialize_sandbox
 
-    user_prompt = f"""
-Task description:
-{task_description}
+    sandbox = initialize_sandbox("./sandbox")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".py", dir="./sandbox") as tmp:
+        tmp.write(code.encode("utf-8"))
+        tmp_path = Path(tmp.name)
 
-Code to audit:
-{code}
-
-Instructions:
-- Identify logical bugs
-- Identify security issues
-- Identify style or best-practice violations
-- Identify mismatches with the task description
-- Be concise and structured
-"""
-
-    audit_report = _chat(system_prompt, user_prompt)
-
-    # Convert raw audit text into structured issues using tools
-    issues = extract_issues(audit_report)
-
-    return {
-        "raw_report": audit_report,
-        "issues": issues,
+    analysis = run_pylint(tmp_path, sandbox)
+    os.unlink(tmp_path)
+    
+    # Log the auditor action
+    result = {
+        "issues": [issue.to_dict() for issue in analysis.issues],
+        "score": analysis.score,
+        "success": analysis.success,
+        "error": analysis.error,
+        "metadata": analysis.metadata,
     }
+    
+    log_experiment(
+        agent_name="Auditor",
+        model_used="pylint",
+        action=ActionType.ANALYSIS,
+        details={
+            "input_prompt": f"Analyzing code for task: {task_description}",
+            "output_response": f"Found {len(result['issues'])} issues. Score: {result['score']}"
+        },
+        status="SUCCESS" if result["success"] else "FAILURE"
+    )
+    
+    return result
 
 
 def fixer_agent(code: str, issues: list) -> str:
     """
-    Fixes the provided code based on issues identified by the auditor.
+    Attempts to auto-fix code using tools in the tools folder.
+    Currently removes unused imports if detected by issues.
     """
-    system_prompt = (
-        "You are a senior software engineer. "
-        "You fix code carefully without introducing new bugs."
+    import tempfile
+    from pathlib import Path
+    from src.tools import initialize_sandbox, read_file, write_file
+
+    sandbox = initialize_sandbox("./sandbox")
+    # Write code to temp file in sandbox
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".py", dir="./sandbox") as tmp:
+        tmp.write(code.encode("utf-8"))
+        tmp_path = Path(tmp.name)
+
+    # Detect unused imports from issues
+    unused_import_lines = set()
+    for issue in issues:
+        if issue.get("symbol") == "unused-import":
+            unused_import_lines.add(issue.get("line"))
+
+    # If no unused imports, return code as is
+    if not unused_import_lines:
+        os.unlink(tmp_path)
+        log_experiment(
+            agent_name="Fixer",
+            model_used="auto-fixer",
+            action=ActionType.FIX,
+            details={
+                "input_prompt": f"Attempting to fix {len(issues)} issues",
+                "output_response": "No unused imports to fix. Code returned unchanged."
+            },
+            status="SUCCESS"
+        )
+        return code
+
+    # Read code lines
+    result = read_file(tmp_path, sandbox)
+    if not result.success:
+        os.unlink(tmp_path)
+        log_experiment(
+            agent_name="Fixer",
+            model_used="auto-fixer",
+            action=ActionType.FIX,
+            details={
+                "input_prompt": f"Attempting to fix {len(issues)} issues",
+                "output_response": f"Failed to read file: {result.error}"
+            },
+            status="FAILURE"
+        )
+        return code
+    lines = result.content.splitlines()
+
+    # Remove lines with unused imports
+    fixed_lines = [line for idx, line in enumerate(lines, 1) if idx not in unused_import_lines]
+    fixed_code = "\n".join(fixed_lines)
+
+    os.unlink(tmp_path)
+    
+    log_experiment(
+        agent_name="Fixer",
+        model_used="auto-fixer",
+        action=ActionType.FIX,
+        details={
+            "input_prompt": f"Removing {len(unused_import_lines)} unused import(s) from lines {sorted(unused_import_lines)}",
+            "output_response": f"Successfully removed unused imports. Fixed code length: {len(fixed_code)} chars"
+        },
+        status="SUCCESS"
     )
-
-    user_prompt = f"""
-Original code:
-{code}
-
-Identified issues:
-{issues}
-
-Instructions:
-- Fix ALL listed issues
-- Preserve existing behavior unless incorrect
-- Improve clarity and robustness
-- Return ONLY the corrected code
-"""
-
-    fixed_code = _chat(system_prompt, user_prompt)
-
-    # Optionally post-process with tools
-    fixed_code = apply_fixes(original=code, proposed=fixed_code)
-
+    
     return fixed_code
 
 
 def judge_agent(original_code: str, fixed_code: str, task_description: str) -> dict:
     """
-    Evaluates whether the fixed code correctly solves the task
-    and improves upon the original.
+    Evaluates the fixed code using static analysis and testing tools.
     """
-    system_prompt = (
-        "You are a strict but fair software judge. "
-        "You evaluate correctness, quality, and completeness."
-    )
+    import tempfile
+    from pathlib import Path
+    from src.tools import initialize_sandbox
 
-    user_prompt = f"""
-Task description:
-{task_description}
+    sandbox = initialize_sandbox("./sandbox")
+    # Write fixed code to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".py", dir="./sandbox") as tmp:
+        tmp.write(fixed_code.encode("utf-8"))
+        tmp_path = Path(tmp.name)
 
-Original code:
-{original_code}
-
-Fixed code:
-{fixed_code}
-
-Instructions:
-- Compare original vs fixed
-- Judge correctness relative to the task
-- Judge code quality and safety
-- Provide a final verdict
-"""
-
-    judgment = _chat(system_prompt, user_prompt)
-
-    score = score_solution(judgment)
-
-    return {
-        "verdict": judgment,
-        "score": score,
+    analysis = run_pylint(tmp_path, sandbox)
+    os.unlink(tmp_path)
+    
+    result = {
+        "score": analysis.score,
+        "issues": [issue.to_dict() for issue in analysis.issues],
+        "success": analysis.success,
+        "error": analysis.error,
+        "metadata": analysis.metadata,
     }
+    
+    log_experiment(
+        agent_name="Judge",
+        model_used="pylint",
+        action=ActionType.DEBUG,
+        details={
+            "input_prompt": f"Evaluating fixed code for task: {task_description}",
+            "output_response": f"Final score: {result['score']}, Issues remaining: {len(result['issues'])}"
+        },
+        status="SUCCESS" if result["success"] else "FAILURE"
+    )
+    
+    return result
